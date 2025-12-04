@@ -1,3 +1,5 @@
+import { db } from '../firebaseConfig';
+import { collection, addDoc } from 'firebase/firestore';
 import { useState, useEffect } from "react";
 import { Text, TouchableHighlight, View, StyleSheet } from "react-native";
 import CircularProgress from "../components/CircularProgress"; 
