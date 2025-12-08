@@ -9,7 +9,7 @@ export default function Tabs() {
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
-        headerShown: false, // Üst başlığı göstermek istersen true
+        headerShown: false, 
         tabBarActiveTintColor: "#f85454ff",
         tabBarInactiveTintColor: '#000000ff',
         tabBarStyle: { height: 60,backgroundColor:'#fdfdfdff' },
