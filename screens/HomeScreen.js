@@ -32,7 +32,7 @@ export default function HomeScreen() {
       {/* Circular Progress */}
       <CircularProgress size={220} strokeWidth={14} progress={progress} color="#ffffffff" />
 
-      {/* Timer Text */}
+      
       <Text style={styles.timerText}>{formatTime(time)}</Text>
 
       {/* Start/Pause Button */}
