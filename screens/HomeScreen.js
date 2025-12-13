@@ -67,14 +67,14 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
   },
   button: {
-    backgroundColor: "#7f5353ff",
+    backgroundColor: "#000000ff",
     paddingVertical: 15,
     paddingHorizontal: 30,
     borderRadius: 5,
     marginVertical: 10,
   },
   buttonText: {
-    color: "#a16666ff",
+    color: "#ffffffff",
     fontSize: 18,
     fontWeight: "bold",
   },
