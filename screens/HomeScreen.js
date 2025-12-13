@@ -56,13 +56,11 @@ export default function HomeScreen() {
 
   const [time, setTime] = useState(currentTotalSeconds);
 
-  // Mod/süre değişince reset + pause
   useEffect(() => {
     setTime(currentTotalSeconds);
     setIsRunning(false);
   }, [currentTotalSeconds]);
 
-  // Timer tick
   useEffect(() => {
     let timer;
     if (isRunning && time > 0) {
