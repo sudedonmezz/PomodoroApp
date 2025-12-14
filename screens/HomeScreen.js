@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { View, StyleSheet, ScrollView, useWindowDimensions, Alert } from "react-native";
+import {
+  View,
+  StyleSheet,
+  ScrollView,
+  useWindowDimensions,
+  Alert,
+  AppState,
+} from "react-native";
 import CircularProgress from "../components/CircularProgress";
 
 import { useAuth } from "../src/auth/AuthProvider";
@@ -26,8 +33,6 @@ import CategorySelector from "../components/CategorySelector";
 export default function HomeScreen() {
   const { width } = useWindowDimensions();
   const { user } = useAuth();
-
-  // user yoksa (çok kısa an olabilir) ekrana bir şey basma
   if (!user) return null;
 
   const uid = user.uid;
@@ -35,6 +40,7 @@ export default function HomeScreen() {
   // ✅ kullanıcıya özel collection ref’leri
   const categoriesRef = collection(db, "users", uid, "categories");
   const summariesRef = collection(db, "users", uid, "session_summaries");
+  const distractionsRef = collection(db, "users", uid, "distractions");
 
   const [workMinutes, setWorkMinutes] = useState(25);
   const [breakMinutes, setBreakMinutes] = useState(5);
@@ -57,6 +63,10 @@ export default function HomeScreen() {
 
   const phaseTotalRef = useRef(0);
 
+  // ✅ AppState
+  const appStateRef = useRef(AppState.currentState);
+  const [distractionCount, setDistractionCount] = useState(0);
+
   const getTotalSeconds = (m) => (m === "work" ? workMinutes : breakMinutes) * 60;
 
   const currentTotalSeconds = useMemo(
@@ -66,7 +76,7 @@ export default function HomeScreen() {
 
   const [time, setTime] = useState(currentTotalSeconds);
 
-  // ✅ KATEGORİLER: artık users/{uid}/categories dinliyoruz
+  // ✅ KATEGORİLER: users/{uid}/categories dinle
   useEffect(() => {
     const q = query(categoriesRef, orderBy("createdAt", "asc"));
     const unsub = onSnapshot(
@@ -82,6 +92,7 @@ export default function HomeScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uid]);
 
+  // mode/süre değişince fazı resetle
   useEffect(() => {
     setTime(currentTotalSeconds);
     setIsRunning(false);
@@ -112,13 +123,19 @@ export default function HomeScreen() {
     setWorkAccum(0);
     setBreakAccum(0);
 
+    setDistractionCount(0);
+
     return no;
   };
 
-  const saveSessionSummaryToDB = async ({ endedBy, finalWorkSec, finalBreakSec, finalSessionNo }) => {
+  const saveSessionSummaryToDB = async ({
+    endedBy,
+    finalWorkSec,
+    finalBreakSec,
+    finalSessionNo,
+  }) => {
     if ((finalWorkSec + finalBreakSec) <= 0 || finalSessionNo == null) return;
 
-    // ✅ users/{uid}/session_summaries içine yaz
     await addDoc(summariesRef, {
       sessionNo: finalSessionNo,
       categoryId: selectedCategoryId ?? null,
@@ -132,6 +149,80 @@ export default function HomeScreen() {
     });
   };
 
+  // ✅ distraction kaydı
+  const logDistraction = async () => {
+    try {
+      const phaseTotal = phaseTotalRef.current;
+      const elapsed = Math.max(0, phaseTotal - time);
+
+      await addDoc(distractionsRef, {
+        sessionNo: sessionNo ?? null,
+        mode,
+        secondsIntoPhase: elapsed,
+        happenedAt: serverTimestamp(),
+        reason: "app_background",
+      });
+
+      setDistractionCount((c) => c + 1);
+    } catch (e) {
+      console.log("logDistraction error:", e);
+    }
+  };
+
+  // ✅ arka plana gidince otomatik pause + distraction
+  const pauseBecauseDistraction = async () => {
+    if (!isRunning) return;
+
+    setIsRunning(false);
+    await ensureSessionStarted();
+
+    const phaseTotal = phaseTotalRef.current;
+    const elapsed = Math.max(0, phaseTotal - time);
+
+    if (elapsed > 0) {
+      if (mode === "work") {
+        workAccumRef.current += elapsed;
+        setWorkAccum(workAccumRef.current);
+      } else {
+        breakAccumRef.current += elapsed;
+        setBreakAccum(breakAccumRef.current);
+      }
+    }
+
+    await logDistraction();
+  };
+
+  // ✅ AppState listener
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", async (nextState) => {
+      const prev = appStateRef.current;
+      appStateRef.current = nextState;
+
+      if (isRunning && (nextState === "background" || nextState === "inactive")) {
+        await pauseBecauseDistraction();
+        return;
+      }
+
+      if (prev !== "active" && nextState === "active") {
+        if (!isRunning && sessionNo != null) {
+          setTimeout(() => {
+            Alert.alert(
+              "Geri geldin 👀",
+              "Sayaç duraklatıldı. Devam etmek ister misin?",
+              [
+                { text: "Hayır", style: "cancel" },
+                { text: "Devam", onPress: () => setIsRunning(true) },
+              ]
+            );
+          }, 50);
+        }
+      }
+    });
+
+    return () => sub.remove();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isRunning, sessionNo, mode, time]);
+
   const toggleRun = async () => {
     if (!isRunning) {
       await ensureSessionStarted();
@@ -144,9 +235,9 @@ export default function HomeScreen() {
     setIsRunning(false);
     await ensureSessionStarted();
 
-    // elapsed ekle
     const phaseTotal = phaseTotalRef.current;
     const elapsed = Math.max(0, phaseTotal - time);
+
     if (elapsed > 0) {
       if (mode === "work") {
         workAccumRef.current += elapsed;
@@ -207,7 +298,7 @@ export default function HomeScreen() {
     setTimeout(() => {
       Alert.alert(
         "Seans Özeti",
-        `Çalışma: ${totalWorkMin} dk\nMola: ${totalBreakMin} dk\nSeans ID: ${finalSessionNo ?? "-"}`,
+        `Çalışma: ${totalWorkMin} dk\nMola: ${totalBreakMin} dk\nDikkat dağınıklığı: ${distractionCount}\nSeans ID: ${finalSessionNo ?? "-"}`,
         [{ text: "Tamam" }]
       );
     }, 50);
@@ -221,12 +312,15 @@ export default function HomeScreen() {
     setWorkAccum(0);
     setBreakAccum(0);
 
+    setDistractionCount(0);
+
     setMode("work");
     const w = getTotalSeconds("work");
     setTime(w);
     phaseTotalRef.current = w;
   };
 
+  // Timer tick
   useEffect(() => {
     let timer;
 
@@ -270,7 +364,8 @@ export default function HomeScreen() {
     }
 
     return () => clearInterval(timer);
-  }, [isRunning, time, mode]); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isRunning, time, mode]);
 
   const progress = useMemo(() => {
     const total = phaseTotalRef.current || currentTotalSeconds;
@@ -327,7 +422,12 @@ export default function HomeScreen() {
         />
 
         <View style={styles.progressWrap}>
-          <CircularProgress size={progressSize} strokeWidth={14} progress={progress} color="#ffffffff" />
+          <CircularProgress
+            size={progressSize}
+            strokeWidth={14}
+            progress={progress}
+            color="#ffffffff"
+          />
         </View>
 
         <View style={styles.timeWrap}>
@@ -339,6 +439,7 @@ export default function HomeScreen() {
                 : "☕ Mola"
             }
           />
+          <TimerHeader.SubInfo text={`⚠️ Dikkat dağınıklığı: ${distractionCount}`} />
         </View>
 
         <PrimaryControls

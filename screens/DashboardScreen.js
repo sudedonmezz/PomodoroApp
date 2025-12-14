@@ -12,9 +12,11 @@ export default function DashboardScreen() {
 
   const summariesRef = collection(db, "users", uid, "session_summaries");
   const categoriesRef = collection(db, "users", uid, "categories");
+  const distractionsRef = collection(db, "users", uid, "distractions");
 
   const [summaries, setSummaries] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [distractions, setDistractions] = useState([]);
 
   useEffect(() => {
     const q = query(summariesRef, orderBy("endedAt", "desc"));
@@ -32,6 +34,14 @@ export default function DashboardScreen() {
     return () => unsub();
   }, [uid]);
 
+  useEffect(() => {
+    const q = query(distractionsRef, orderBy("happenedAt", "desc"));
+    const unsub = onSnapshot(q, (snap) => {
+      setDistractions(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    });
+    return () => unsub();
+  }, [uid]);
+
   const categoryNameById = useMemo(() => {
     const map = {};
     for (const c of categories) map[c.id] = c.name;
@@ -41,7 +51,8 @@ export default function DashboardScreen() {
   const toMin = (sec) => Math.floor((sec || 0) / 60);
 
   const totals = useMemo(() => {
-    let w = 0, b = 0;
+    let w = 0,
+      b = 0;
     for (const s of summaries) {
       w += s.workSeconds || 0;
       b += s.breakSeconds || 0;
@@ -49,7 +60,22 @@ export default function DashboardScreen() {
     return { w, b };
   }, [summaries]);
 
-  const renderItem = ({ item }) => {
+  const distractionSummary = useMemo(() => {
+    const total = distractions.length;
+
+    const sessions = {};
+    for (const d of distractions) {
+      const key = d.sessionNo ?? "unknown";
+      sessions[key] = (sessions[key] || 0) + 1;
+    }
+
+    const sessionCount = Object.keys(sessions).length;
+    const avgPerSession = sessionCount > 0 ? (total / sessionCount).toFixed(1) : "0";
+
+    return { total, avgPerSession };
+  }, [distractions]);
+
+  const renderSession = ({ item }) => {
     const when = item.endedAt?.toDate?.() ? item.endedAt.toDate().toLocaleString() : "";
     const catName = item.categoryId ? categoryNameById[item.categoryId] : "Kategori yok";
 
@@ -58,7 +84,11 @@ export default function DashboardScreen() {
         <View style={styles.rowTop}>
           <Text style={styles.sessionText}>Seans #{item.sessionNo ?? "-"}</Text>
           <Text style={styles.endedBy}>
-            {item.endedBy === "stopped" ? "⏹ sonlandır" : item.endedBy === "completed" ? "✅ tamamlandı" : ""}
+            {item.endedBy === "stopped"
+              ? "⏹ sonlandır"
+              : item.endedBy === "completed"
+              ? "✅ tamamlandı"
+              : ""}
           </Text>
         </View>
 
@@ -70,10 +100,27 @@ export default function DashboardScreen() {
     );
   };
 
+  const renderDistraction = ({ item }) => {
+    const when = item.happenedAt?.toDate?.() ? item.happenedAt.toDate().toLocaleString() : "";
+    const icon = item.mode === "work" ? "🎯" : "☕";
+    return (
+      <View style={styles.sessionRow}>
+        <Text style={styles.sessionText}>
+          ⚠️ Seans #{item.sessionNo ?? "-"} {icon}
+        </Text>
+        <Text style={styles.sessionSub}>
+          Fazda geçen: {toMin(item.secondsIntoPhase)} dk • Sebep: {item.reason ?? "-"}
+        </Text>
+        <Text style={styles.sessionDate}>{when}</Text>
+      </View>
+    );
+  };
+
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Dashboard</Text>
 
+      {/* TOPLAM KARTLAR */}
       <View style={styles.cardsRow}>
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Toplam Çalışma</Text>
@@ -85,12 +132,28 @@ export default function DashboardScreen() {
         </View>
       </View>
 
+      <View style={styles.cardWide}>
+        <Text style={styles.cardTitle}>Dikkat Dağınıklığı</Text>
+        <Text style={styles.bigText}>⚠️ {distractionSummary.total}</Text>
+        <Text style={styles.sessionSub}>Seans başına ortalama: {distractionSummary.avgPerSession}</Text>
+      </View>
+
+      <Text style={styles.sectionTitle}>Seans Özetleri</Text>
       <FlatList
         data={summaries}
         keyExtractor={(item) => item.id}
-        contentContainerStyle={{ gap: 10, paddingBottom: 20 }}
-        ListEmptyComponent={<Text style={{ marginTop: 20 }}>Henüz seans özeti yok</Text>}
-        renderItem={renderItem}
+        contentContainerStyle={{ gap: 10, paddingBottom: 14 }}
+        ListEmptyComponent={<Text style={{ marginTop: 10 }}>Henüz seans özeti yok</Text>}
+        renderItem={renderSession}
+      />
+
+      <Text style={styles.sectionTitle}>Dikkat Dağınıklıkları</Text>
+      <FlatList
+        data={distractions}
+        keyExtractor={(item) => item.id}
+        contentContainerStyle={{ gap: 10, paddingBottom: 40 }}
+        ListEmptyComponent={<Text style={{ marginTop: 10 }}>Henüz dikkat dağınıklığı yok 🎉</Text>}
+        renderItem={renderDistraction}
       />
     </View>
   );
@@ -100,8 +163,12 @@ const styles = StyleSheet.create({
   container: { flex: 1, padding: 16, backgroundColor: "#fff" },
   title: { fontSize: 22, fontWeight: "800", marginBottom: 16 },
 
+  sectionTitle: { fontSize: 16, fontWeight: "900", marginTop: 8, marginBottom: 10 },
+
   cardsRow: { flexDirection: "row", gap: 12, marginBottom: 12 },
   card: { flex: 1, backgroundColor: "#f2f2f2", padding: 14, borderRadius: 12 },
+  cardWide: { backgroundColor: "#f2f2f2", padding: 14, borderRadius: 12, marginBottom: 10 },
+
   cardTitle: { fontSize: 13, fontWeight: "800", marginBottom: 6 },
   bigText: { fontSize: 24, fontWeight: "900" },
 
