@@ -27,56 +27,46 @@ export default function CategorySelector({
     return found?.name ?? "Kategori seç";
   }, [categories, selectedCategoryId]);
 
+  const [addState, setAddState] = useState({ visible: false, name: "" });
+  const [renameState, setRenameState] = useState({ visible: false, id: null, name: "" });
+
   const openActions = (cat) => {
     Alert.alert(
       "Kategori",
       `"${cat.name}"`,
       [
-        {
-          text: "Yeniden Adlandır",
-          onPress: () => renameFlow(cat),
-        },
+        { text: "Yeniden Adlandır", onPress: () => setRenameState({ visible: true, id: cat.id, name: cat.name }) },
         {
           text: "Sil",
           style: "destructive",
-          onPress: () => deleteFlow(cat),
-        },
-        { text: "Vazgeç", style: "cancel" },
-      ],
-      { cancelable: true }
-    );
-  };
-
-  const renameFlow = (cat) => {
-    // Android'de prompt yok o yüzden kendi modal açıyorum.
-    setRenameState({ visible: true, id: cat.id, name: cat.name });
-  };
-
-  const deleteFlow = (cat) => {
-    Alert.alert(
-      "Silinsin mi?",
-      `"${cat.name}" silinecek. Devam?`,
-      [
-        { text: "Vazgeç", style: "cancel" },
-        {
-          text: "Sil",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              await onDelete(cat.id);
-            } catch (e) {
-              console.log(e);
-              Alert.alert("Hata", "Silme başarısız.");
-            }
+          onPress: () => {
+            Alert.alert(
+              "Silinsin mi?",
+              `"${cat.name}" silinecek. Devam?`,
+              [
+                { text: "Vazgeç", style: "cancel" },
+                {
+                  text: "Sil",
+                  style: "destructive",
+                  onPress: async () => {
+                    try {
+                      await onDelete(cat.id);
+                    } catch (e) {
+                      console.log(e);
+                      Alert.alert("Hata", "Silme başarısız.");
+                    }
+                  },
+                },
+              ],
+              { cancelable: true }
+            );
           },
         },
+        { text: "Vazgeç", style: "cancel" },
       ],
       { cancelable: true }
     );
   };
-
-  const [addState, setAddState] = useState({ visible: false, name: "" });
-  const [renameState, setRenameState] = useState({ visible: false, id: null, name: "" });
 
   const addCategory = async () => {
     const name = addState.name.trim();
@@ -105,21 +95,19 @@ export default function CategorySelector({
   return (
     <View style={styles.wrap}>
       <Text style={styles.label}>Kategori</Text>
+
       <Pressable style={styles.selectBtn} onPress={() => setOpen(true)}>
         <Text style={styles.selectText}>{selectedName}</Text>
         <Text style={styles.chev}>▾</Text>
       </Pressable>
 
-      {/* Liste Modal */}
+      {/* LIST MODAL */}
       <Modal visible={open} transparent animationType="fade">
         <View style={styles.overlay}>
           <View style={styles.card}>
             <View style={styles.cardHeader}>
               <Text style={styles.title}>Kategori Seç</Text>
-              <Pressable
-                onPress={() => setAddState({ visible: true, name: "" })}
-                style={styles.smallAction}
-              >
+              <Pressable onPress={() => setAddState({ visible: true, name: "" })} style={styles.smallAction}>
                 <Text style={styles.smallActionText}>＋ Ekle</Text>
               </Pressable>
             </View>
@@ -127,9 +115,7 @@ export default function CategorySelector({
             <FlatList
               data={categories}
               keyExtractor={(item) => item.id}
-              ListEmptyComponent={
-                <Text style={styles.empty}>Henüz kategori yok. “Ekle” ile oluştur.</Text>
-              }
+              ListEmptyComponent={<Text style={styles.empty}>Henüz kategori yok. “Ekle” ile oluştur.</Text>}
               renderItem={({ item }) => {
                 const active = item.id === selectedCategoryId;
                 return (
@@ -139,12 +125,9 @@ export default function CategorySelector({
                       onSelect(item.id);
                       setOpen(false);
                     }}
-                    onLongPress={() => openActions(item)}
-                    delayLongPress={300}
                   >
-                    <Text style={[styles.rowText, active && styles.rowTextActive]}>
-                      {item.name}
-                    </Text>
+                    <Text style={[styles.rowText, active && styles.rowTextActive]}>{item.name}</Text>
+
                     <Pressable onPress={() => openActions(item)} hitSlop={10}>
                       <Text style={styles.more}>⋯</Text>
                     </Pressable>
@@ -162,12 +145,10 @@ export default function CategorySelector({
 
       {/* ADD MODAL */}
       <Modal visible={addState.visible} transparent animationType="fade">
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-          style={styles.overlay}
-        >
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.overlay}>
           <View style={styles.card}>
             <Text style={styles.title}>Kategori Ekle</Text>
+
             <TextInput
               value={addState.name}
               onChangeText={(t) => setAddState((s) => ({ ...s, name: t }))}
@@ -175,11 +156,9 @@ export default function CategorySelector({
               placeholder="Örn: Kitap okuma"
               autoFocus
             />
+
             <View style={styles.btnRow}>
-              <Pressable
-                style={[styles.btn, styles.btnGhost]}
-                onPress={() => setAddState({ visible: false, name: "" })}
-              >
+              <Pressable style={[styles.btn, styles.btnGhost]} onPress={() => setAddState({ visible: false, name: "" })}>
                 <Text style={styles.btnGhostText}>İptal</Text>
               </Pressable>
               <Pressable style={styles.btn} onPress={addCategory}>
@@ -192,12 +171,10 @@ export default function CategorySelector({
 
       {/* RENAME MODAL */}
       <Modal visible={renameState.visible} transparent animationType="fade">
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-          style={styles.overlay}
-        >
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.overlay}>
           <View style={styles.card}>
             <Text style={styles.title}>Yeniden Adlandır</Text>
+
             <TextInput
               value={renameState.name}
               onChangeText={(t) => setRenameState((s) => ({ ...s, name: t }))}
@@ -205,6 +182,7 @@ export default function CategorySelector({
               placeholder="Yeni ad"
               autoFocus
             />
+
             <View style={styles.btnRow}>
               <Pressable
                 style={[styles.btn, styles.btnGhost]}
@@ -225,7 +203,6 @@ export default function CategorySelector({
 
 const styles = StyleSheet.create({
   wrap: { width: "100%", gap: 6 },
-
   label: { fontSize: 14, fontWeight: "900", color: "#000" },
 
   selectBtn: {
@@ -257,20 +234,10 @@ const styles = StyleSheet.create({
     maxHeight: "80%",
   },
 
-  cardHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 10,
-  },
+  cardHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
   title: { fontSize: 18, fontWeight: "900" },
 
-  smallAction: {
-    backgroundColor: "#eee",
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 10,
-  },
+  smallAction: { backgroundColor: "#eee", paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10 },
   smallActionText: { fontWeight: "900" },
 
   row: {
@@ -288,13 +255,7 @@ const styles = StyleSheet.create({
 
   empty: { color: "#666", fontWeight: "700", paddingVertical: 10 },
 
-  closeBtn: {
-    marginTop: 10,
-    backgroundColor: "#000",
-    borderRadius: 12,
-    paddingVertical: 12,
-    alignItems: "center",
-  },
+  closeBtn: { marginTop: 10, backgroundColor: "#000", borderRadius: 12, paddingVertical: 12, alignItems: "center" },
   closeText: { color: "#fff", fontWeight: "900" },
 
   input: {
@@ -307,14 +268,9 @@ const styles = StyleSheet.create({
     backgroundColor: "#fafafa",
     marginTop: 10,
   },
+
   btnRow: { flexDirection: "row", gap: 10, marginTop: 14 },
-  btn: {
-    flex: 1,
-    backgroundColor: "#000",
-    borderRadius: 12,
-    paddingVertical: 12,
-    alignItems: "center",
-  },
+  btn: { flex: 1, backgroundColor: "#000", borderRadius: 12, paddingVertical: 12, alignItems: "center" },
   btnText: { color: "#fff", fontWeight: "900" },
   btnGhost: { backgroundColor: "#eee" },
   btnGhostText: { color: "#000", fontWeight: "900" },

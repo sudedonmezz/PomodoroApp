@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { View, StyleSheet, ScrollView, useWindowDimensions, Alert } from "react-native";
 import CircularProgress from "../components/CircularProgress";
 
+import { useAuth } from "../src/auth/AuthProvider";
 import { db } from "../firebaseConfig";
+
 import {
   collection,
   addDoc,
@@ -13,20 +15,31 @@ import {
   doc,
   deleteDoc,
   updateDoc,
+  runTransaction,
 } from "firebase/firestore";
 
 import TimerHeader from "../components/TimerHeader";
 import PrimaryControls from "../components/PrimaryControls";
 import SettingsModal from "../components/SettingsModal";
-import CategorySelector from "../components/CategorySelector"; 
+import CategorySelector from "../components/CategorySelector";
 
 export default function HomeScreen() {
   const { width } = useWindowDimensions();
+  const { user } = useAuth();
+
+  // user yoksa (çok kısa an olabilir) ekrana bir şey basma
+  if (!user) return null;
+
+  const uid = user.uid;
+
+  // ✅ kullanıcıya özel collection ref’leri
+  const categoriesRef = collection(db, "users", uid, "categories");
+  const summariesRef = collection(db, "users", uid, "session_summaries");
 
   const [workMinutes, setWorkMinutes] = useState(25);
   const [breakMinutes, setBreakMinutes] = useState(5);
 
-  const [mode, setMode] = useState("work"); 
+  const [mode, setMode] = useState("work");
   const [isRunning, setIsRunning] = useState(false);
 
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -34,9 +47,28 @@ export default function HomeScreen() {
   const [categories, setCategories] = useState([]);
   const [selectedCategoryId, setSelectedCategoryId] = useState(null);
 
-  // Firestore: kategoriler
+  const [workAccum, setWorkAccum] = useState(0);
+  const [breakAccum, setBreakAccum] = useState(0);
+  const workAccumRef = useRef(0);
+  const breakAccumRef = useRef(0);
+
+  const [sessionNo, setSessionNo] = useState(null);
+  const startedAtRef = useRef(null);
+
+  const phaseTotalRef = useRef(0);
+
+  const getTotalSeconds = (m) => (m === "work" ? workMinutes : breakMinutes) * 60;
+
+  const currentTotalSeconds = useMemo(
+    () => getTotalSeconds(mode),
+    [mode, workMinutes, breakMinutes]
+  );
+
+  const [time, setTime] = useState(currentTotalSeconds);
+
+  // ✅ KATEGORİLER: artık users/{uid}/categories dinliyoruz
   useEffect(() => {
-    const q = query(collection(db, "categories"), orderBy("createdAt", "asc"));
+    const q = query(categoriesRef, orderBy("createdAt", "asc"));
     const unsub = onSnapshot(
       q,
       (snap) => {
@@ -47,22 +79,157 @@ export default function HomeScreen() {
       (err) => console.log("categories onSnapshot error:", err)
     );
     return () => unsub();
-  
-  }, []);
-
-  const currentTotalSeconds = useMemo(() => {
-    return (mode === "work" ? workMinutes : breakMinutes) * 60;
-  }, [mode, workMinutes, breakMinutes]);
-
-  const [time, setTime] = useState(currentTotalSeconds);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uid]);
 
   useEffect(() => {
     setTime(currentTotalSeconds);
     setIsRunning(false);
+    phaseTotalRef.current = currentTotalSeconds;
   }, [currentTotalSeconds]);
+
+  // ✅ counter -> sessionNo (kullanıcıya özel sayaç)
+  const getNextSessionNo = async () => {
+    const counterRef = doc(db, "users", uid, "counters", "session_summaries");
+    const nextNo = await runTransaction(db, async (tx) => {
+      const snap = await tx.get(counterRef);
+      const current = snap.exists() ? (snap.data().value ?? 0) : 0;
+      const updated = current + 1;
+      tx.set(counterRef, { value: updated }, { merge: true });
+      return updated;
+    });
+    return nextNo;
+  };
+
+  const ensureSessionStarted = async () => {
+    if (sessionNo != null) return sessionNo;
+    const no = await getNextSessionNo();
+    setSessionNo(no);
+    startedAtRef.current = new Date();
+
+    workAccumRef.current = 0;
+    breakAccumRef.current = 0;
+    setWorkAccum(0);
+    setBreakAccum(0);
+
+    return no;
+  };
+
+  const saveSessionSummaryToDB = async ({ endedBy, finalWorkSec, finalBreakSec, finalSessionNo }) => {
+    if ((finalWorkSec + finalBreakSec) <= 0 || finalSessionNo == null) return;
+
+    // ✅ users/{uid}/session_summaries içine yaz
+    await addDoc(summariesRef, {
+      sessionNo: finalSessionNo,
+      categoryId: selectedCategoryId ?? null,
+      workSeconds: finalWorkSec,
+      breakSeconds: finalBreakSec,
+      plannedWorkMinutes: workMinutes,
+      plannedBreakMinutes: breakMinutes,
+      startedAt: startedAtRef.current ?? null,
+      endedAt: serverTimestamp(),
+      endedBy,
+    });
+  };
+
+  const toggleRun = async () => {
+    if (!isRunning) {
+      await ensureSessionStarted();
+      phaseTotalRef.current = getTotalSeconds(mode);
+    }
+    setIsRunning((v) => !v);
+  };
+
+  const skip = async () => {
+    setIsRunning(false);
+    await ensureSessionStarted();
+
+    // elapsed ekle
+    const phaseTotal = phaseTotalRef.current;
+    const elapsed = Math.max(0, phaseTotal - time);
+    if (elapsed > 0) {
+      if (mode === "work") {
+        workAccumRef.current += elapsed;
+        setWorkAccum(workAccumRef.current);
+      } else {
+        breakAccumRef.current += elapsed;
+        setBreakAccum(breakAccumRef.current);
+      }
+    }
+
+    const nextMode = mode === "work" ? "break" : "work";
+    setMode(nextMode);
+
+    const nextTotal = getTotalSeconds(nextMode);
+    setTime(nextTotal);
+    phaseTotalRef.current = nextTotal;
+  };
+
+  const stopSession = async () => {
+    setIsRunning(false);
+
+    if (sessionNo == null && (workAccumRef.current + breakAccumRef.current) === 0) {
+      setMode("work");
+      const w = getTotalSeconds("work");
+      setTime(w);
+      phaseTotalRef.current = w;
+      return;
+    }
+
+    const phaseTotal = phaseTotalRef.current;
+    const elapsed = Math.max(0, phaseTotal - time);
+
+    let finalWorkSec = workAccumRef.current;
+    let finalBreakSec = breakAccumRef.current;
+
+    if (elapsed > 0) {
+      if (mode === "work") finalWorkSec += elapsed;
+      else finalBreakSec += elapsed;
+    }
+
+    const finalSessionNo = sessionNo;
+
+    workAccumRef.current = finalWorkSec;
+    breakAccumRef.current = finalBreakSec;
+    setWorkAccum(finalWorkSec);
+    setBreakAccum(finalBreakSec);
+
+    await saveSessionSummaryToDB({
+      endedBy: "stopped",
+      finalWorkSec,
+      finalBreakSec,
+      finalSessionNo,
+    });
+
+    const totalWorkMin = Math.floor(finalWorkSec / 60);
+    const totalBreakMin = Math.floor(finalBreakSec / 60);
+
+    setTimeout(() => {
+      Alert.alert(
+        "Seans Özeti",
+        `Çalışma: ${totalWorkMin} dk\nMola: ${totalBreakMin} dk\nSeans ID: ${finalSessionNo ?? "-"}`,
+        [{ text: "Tamam" }]
+      );
+    }, 50);
+
+    // reset
+    setSessionNo(null);
+    startedAtRef.current = null;
+
+    workAccumRef.current = 0;
+    breakAccumRef.current = 0;
+    setWorkAccum(0);
+    setBreakAccum(0);
+
+    setMode("work");
+    const w = getTotalSeconds("work");
+    setTime(w);
+    phaseTotalRef.current = w;
+  };
 
   useEffect(() => {
     let timer;
+
     if (isRunning && time > 0) {
       timer = setInterval(() => setTime((prev) => prev - 1), 1000);
     }
@@ -70,23 +237,46 @@ export default function HomeScreen() {
     if (isRunning && time === 0) {
       setIsRunning(false);
 
-      if (mode === "work") {
-        saveSessionSafe(workMinutes * 60, selectedCategoryId);
-        Alert.alert("Bitti!", "Çalışma tamamlandı. Mola zamanı ☕");
-        setMode("break");
-      } else {
-        Alert.alert("Bitti!", "Mola bitti. Tekrar odak zamanı 🔥");
-        setMode("work");
-      }
+      (async () => {
+        await ensureSessionStarted();
+
+        const phaseTotal = phaseTotalRef.current;
+        if (phaseTotal > 0) {
+          if (mode === "work") {
+            workAccumRef.current += phaseTotal;
+            setWorkAccum(workAccumRef.current);
+          } else {
+            breakAccumRef.current += phaseTotal;
+            setBreakAccum(breakAccumRef.current);
+          }
+        }
+
+        if (mode === "work") {
+          Alert.alert("Bitti!", "Çalışma tamamlandı. Mola zamanı ☕");
+          const nextMode = "break";
+          setMode(nextMode);
+          const nextTotal = getTotalSeconds(nextMode);
+          setTime(nextTotal);
+          phaseTotalRef.current = nextTotal;
+        } else {
+          Alert.alert("Bitti!", "Mola bitti. Tekrar odak zamanı 🔥");
+          const nextMode = "work";
+          setMode(nextMode);
+          const nextTotal = getTotalSeconds(nextMode);
+          setTime(nextTotal);
+          phaseTotalRef.current = nextTotal;
+        }
+      })();
     }
 
     return () => clearInterval(timer);
-  }, [isRunning, time, mode, workMinutes, selectedCategoryId]);
+  }, [isRunning, time, mode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const progress = useMemo(() => {
-    if (currentTotalSeconds <= 0) return 0;
-    return (currentTotalSeconds - time) / currentTotalSeconds;
-  }, [currentTotalSeconds, time]);
+    const total = phaseTotalRef.current || currentTotalSeconds;
+    if (total <= 0) return 0;
+    return (total - time) / total;
+  }, [time, currentTotalSeconds]);
 
   const formatTime = (seconds) => {
     const minutes = Math.floor(seconds / 60);
@@ -96,24 +286,9 @@ export default function HomeScreen() {
 
   const resetCurrent = () => {
     setIsRunning(false);
-    setTime(currentTotalSeconds);
-  };
-
-  const skip = () => {
-    setIsRunning(false);
-    setMode((m) => (m === "work" ? "break" : "work"));
-  };
-
-  const saveSessionSafe = async (durationSeconds, categoryId) => {
-    try {
-      await addDoc(collection(db, "sessions"), {
-        categoryId: categoryId ?? null,
-        durationSeconds,
-        finishedAt: serverTimestamp(),
-      });
-    } catch (e) {
-      console.log("saveSession error:", e);
-    }
+    const t = getTotalSeconds(mode);
+    setTime(t);
+    phaseTotalRef.current = t;
   };
 
   const selectedCategoryName = useMemo(() => {
@@ -121,35 +296,29 @@ export default function HomeScreen() {
     return found?.name ?? "Kategori seç";
   }, [categories, selectedCategoryId]);
 
-  // Responsive progress size
   const progressSize = Math.min(Math.floor(width * 0.62), 220);
 
   return (
     <View style={styles.screen}>
-      <ScrollView
-        contentContainerStyle={styles.container}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
+      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
         <TimerHeader mode={mode} onOpenSettings={() => setSettingsOpen(true)} />
 
-        {/* ✅ CircularProgress'in tam üstünde: Liste gibi kategori seçici */}
         <CategorySelector
           categories={categories}
           selectedCategoryId={selectedCategoryId}
           onSelect={setSelectedCategoryId}
           onAdd={async (name) => {
-            const docRef = await addDoc(collection(db, "categories"), {
+            const docRef = await addDoc(categoriesRef, {
               name,
               createdAt: serverTimestamp(),
             });
             setSelectedCategoryId(docRef.id);
           }}
           onRename={async (id, newName) => {
-            await updateDoc(doc(db, "categories", id), { name: newName });
+            await updateDoc(doc(db, "users", uid, "categories", id), { name: newName });
           }}
           onDelete={async (id) => {
-            await deleteDoc(doc(db, "categories", id));
+            await deleteDoc(doc(db, "users", uid, "categories", id));
             if (selectedCategoryId === id) {
               const remaining = categories.filter((c) => c.id !== id);
               setSelectedCategoryId(remaining[0]?.id ?? null);
@@ -158,26 +327,26 @@ export default function HomeScreen() {
         />
 
         <View style={styles.progressWrap}>
-          <CircularProgress
-            size={progressSize}
-            strokeWidth={14}
-            progress={progress}
-            color="#ffffffff"
-          />
+          <CircularProgress size={progressSize} strokeWidth={14} progress={progress} color="#ffffffff" />
         </View>
 
         <View style={styles.timeWrap}>
           <TimerHeader.TimeText value={formatTime(time)} />
           <TimerHeader.SubInfo
-            text={selectedCategoryId ? `🎯 ${selectedCategoryName}` : "🎯 Kategori seçilmedi"}
+            text={
+              mode === "work"
+                ? (selectedCategoryId ? `🎯 ${selectedCategoryName}` : "🎯 Kategori seçilmedi")
+                : "☕ Mola"
+            }
           />
         </View>
 
         <PrimaryControls
           isRunning={isRunning}
-          onToggle={() => setIsRunning((v) => !v)}
+          onToggle={toggleRun}
           onReset={resetCurrent}
           onSkip={skip}
+          onStop={stopSession}
           mode={mode}
         />
 
@@ -197,10 +366,7 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: "#f85454ff",
-  },
+  screen: { flex: 1, backgroundColor: "#f85454ff" },
   container: {
     paddingHorizontal: 16,
     paddingTop: 16,
@@ -208,15 +374,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 12,
   },
-  progressWrap: {
-    width: "100%",
-    alignItems: "center",
-    marginTop: 6,
-  },
-  timeWrap: {
-    width: "100%",
-    alignItems: "center",
-    marginTop: 4,
-    gap: 6,
-  },
+  progressWrap: { width: "100%", alignItems: "center", marginTop: 6 },
+  timeWrap: { width: "100%", alignItems: "center", marginTop: 4, gap: 6 },
 });
