@@ -52,7 +52,6 @@ export default function DashboardScreen() {
 
   const toMin = (sec) => Math.floor((sec || 0) / 60);
 
-  // ✅ Toplamlar (tüm zamanlar)
   const totals = useMemo(() => {
     let w = 0, b = 0;
     for (const s of summaries) {
@@ -62,7 +61,6 @@ export default function DashboardScreen() {
     return { w, b };
   }, [summaries]);
 
-  // ✅ BUGÜN toplam odak (bugünkü çalışma + mola)
   const todayTotals = useMemo(() => {
     const start = new Date();
     start.setHours(0, 0, 0, 0);
@@ -83,7 +81,7 @@ export default function DashboardScreen() {
     return { w, b, focus: w + b };
   }, [summaries]);
 
-  // ✅ Dikkat özeti
+
   const distractionSummary = useMemo(() => {
     const total = distractions.length;
 
@@ -95,7 +93,6 @@ export default function DashboardScreen() {
     const sessionCount = Object.keys(bySession).length;
     const avgPerSession = sessionCount > 0 ? (total / sessionCount).toFixed(1) : "0";
 
-    // ✅ Bugünkü dikkat sayısı
     const start = new Date();
     start.setHours(0, 0, 0, 0);
     const end = new Date();
@@ -111,7 +108,6 @@ export default function DashboardScreen() {
     return { total, today, avgPerSession };
   }, [distractions]);
 
-  // ===== Bar: son 7 gün çalışma (dk)
   const last7BarData = useMemo(() => {
     const now = new Date();
     const days = [];
@@ -153,7 +149,6 @@ export default function DashboardScreen() {
     return { labels, values };
   }, [summaries]);
 
-  // ===== Pie: kategori dağılımı (çalışma)
   const pieData = useMemo(() => {
     const map = {};
     for (const s of summaries) {
@@ -253,7 +248,7 @@ export default function DashboardScreen() {
     <View>
       <Text style={styles.title}>Dashboard</Text>
 
-      {/* ✅ BUGÜN TOPLAM ODAK */}
+      {/*  BUGÜN TOPLAM ODAK */}
       <View style={styles.cardWide}>
         <Text style={styles.cardTitle}>Bugün Toplam Odak</Text>
         <Text style={styles.bigText}>{toMin(todayTotals.focus)} dk</Text>

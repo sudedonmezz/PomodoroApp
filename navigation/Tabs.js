@@ -20,7 +20,7 @@ export default function Tabs() {
 
   return (
     <Tab.Navigator
-      initialRouteName="Ana Sayfa"   // ✅ her zaman Home ile başla
+      initialRouteName="Ana Sayfa"   
       screenOptions={({ route }) => ({
         headerShown: true,
         headerTitleAlign: "center",

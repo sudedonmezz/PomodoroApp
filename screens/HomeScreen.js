@@ -37,7 +37,6 @@ export default function HomeScreen() {
 
   const uid = user.uid;
 
-  // ✅ kullanıcıya özel collection ref’leri
   const categoriesRef = collection(db, "users", uid, "categories");
   const summariesRef = collection(db, "users", uid, "session_summaries");
   const distractionsRef = collection(db, "users", uid, "distractions");
@@ -63,7 +62,7 @@ export default function HomeScreen() {
 
   const phaseTotalRef = useRef(0);
 
-  // ✅ AppState
+  
   const appStateRef = useRef(AppState.currentState);
   const [distractionCount, setDistractionCount] = useState(0);
 
@@ -76,7 +75,7 @@ export default function HomeScreen() {
 
   const [time, setTime] = useState(currentTotalSeconds);
 
-  // ✅ KATEGORİLER: users/{uid}/categories dinle
+
   useEffect(() => {
     const q = query(categoriesRef, orderBy("createdAt", "asc"));
     const unsub = onSnapshot(
@@ -92,14 +91,13 @@ export default function HomeScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uid]);
 
-  // mode/süre değişince fazı resetle
   useEffect(() => {
     setTime(currentTotalSeconds);
     setIsRunning(false);
     phaseTotalRef.current = currentTotalSeconds;
   }, [currentTotalSeconds]);
 
-  // ✅ counter -> sessionNo (kullanıcıya özel sayaç)
+ 
   const getNextSessionNo = async () => {
     const counterRef = doc(db, "users", uid, "counters", "session_summaries");
     const nextNo = await runTransaction(db, async (tx) => {
@@ -149,7 +147,6 @@ export default function HomeScreen() {
     });
   };
 
-  // ✅ distraction kaydı
   const logDistraction = async () => {
     try {
       const phaseTotal = phaseTotalRef.current;
@@ -169,7 +166,7 @@ export default function HomeScreen() {
     }
   };
 
-  // ✅ arka plana gidince otomatik pause + distraction
+  
   const pauseBecauseDistraction = async () => {
     if (!isRunning) return;
 
@@ -192,7 +189,6 @@ export default function HomeScreen() {
     await logDistraction();
   };
 
-  // ✅ AppState listener
   useEffect(() => {
     const sub = AppState.addEventListener("change", async (nextState) => {
       const prev = appStateRef.current;
